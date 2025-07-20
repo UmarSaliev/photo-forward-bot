@@ -2,34 +2,27 @@ import logging
 import os
 import asyncio
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Настройка логирования
+# Логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получаем переменные окружения
-BOT_TOKEN = os.getenv("8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU")
-OWNER_IDS = os.getenv("95293299,784341697")
+# Читаем переменные окружения
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_IDS_ENV = os.getenv("OWNER_IDS", "")
 
-# Проверка наличия токена
+# Проверяем токен
 if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN не задан в переменных окружения!")
     exit(1)
 
-# Преобразуем OWNER_IDS в список чисел
-if OWNER_IDS:
-    OWNER_IDS = [int(x.strip()) for x in OWNER_IDS.split(",")]
-else:
-    OWNER_IDS = []
+# Преобразуем строку OWNER_IDS в список int
+OWNER_IDS = [int(x) for x in OWNER_IDS_ENV.split(",") if x.strip().isdigit()]
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я Telegram-бот.")
+    await update.message.reply_text("👋 Привет! Я Telegram-бот. Введите /help для списка команд.")
 
 # Команда /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,7 +31,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — помощь\n"
         "/ping — проверить связь\n"
         "/status — статус бота\n"
-        "/list — список (только для владельцев)"
+        "/list — список (только для владельцев)\n"
+        "/broadcast — рассылка (только для владельцев)"
     )
 
 # Команда /ping
@@ -49,26 +43,39 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Бот работает нормально.")
 
-# Команда /list (только для владельцев)
+# Команда /list (только владельцам)
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in OWNER_IDS:
-        await update.message.reply_text("📋 Вот ваш список (пример данных).")
-    else:
+    if update.effective_user.id not in OWNER_IDS:
         await update.message.reply_text("⛔ У вас нет доступа к этой команде.")
+        return
+    # Здесь можно вывести реальные данные
+    await update.message.reply_text("📋 Список пользователей: (здесь будет список)")
+
+# Команда /broadcast <текст> (только владельцам)
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in OWNER_IDS:
+        await update.message.reply_text("⛔ У вас нет доступа к этой команде.")
+        return
+    text = " ".join(context.args)
+    if not text:
+        await update.message.reply_text("⚠️ Укажите текст после команды. Пример: /broadcast Привет всем!")
+        return
+    # Разошлём всем сохранённым ID (нужна реализация хранения user_ids)
+    await update.message.reply_text("✅ Рассылка отправлена (эмуляция).")
 
 # Запуск бота
 async def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(CommandHandler("status", status))
-    application.add_handler(CommandHandler("list", list_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("list", list_command))
+    app.add_handler(CommandHandler("broadcast", broadcast))
 
-    logger.info("✅ Бот запущен...")
-    await application.run_polling()
+    logger.info("🚀 Бот запущен!")
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
