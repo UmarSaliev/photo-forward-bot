@@ -1,94 +1,89 @@
 import logging
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
-from aiogram.filters import Command
-from aiogram.enums import ParseMode
-from aiogram.utils.markdown import hbold
-import asyncio
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 import os
 
+# Вставь свои данные ниже
 BOT_TOKEN = os.getenv("8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU")
-OWNER_IDS = {95293299, 784341697}  # Замените на реальные Telegram ID владельцев
+OWNER_IDS = {95293299, 784341697}  # замените на свои Telegram user_id
 
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
-
-user_names = set()
+# Хранилище пользователей, отправивших фото
 user_ids = set()
 
-@dp.message(Command("start"))
-async def start_cmd(message: Message):
-    await message.answer("👋 Привет! Отправь фото с заданием, и оно будет переслано учителю.")
+# Включаем логирование
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-@dp.message(Command("help"))
-async def help_cmd(message: Message):
-    await message.answer(
-        "📖 <b>Доступные команды:</b>\n"
-        "/start – Приветствие\n"
-        "/help – Справка\n"
-        "/list – Список учеников (только для учителя)\n"
-        "/status – Проверка статуса\n"
-        "/ping – Проверка связи\n"
-        "/broadcast – Рассылка от учителя"
-    )
+async def start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Привет! Отправь фото с непонятным заданием — я передам учителю.")
 
-@dp.message(Command("list"))
-async def list_users(message: Message):
-    if message.from_user.id not in OWNER_IDS:
-        await message.answer("⛔ У вас нет доступа к этой команде.")
+async def help_command(update: Update, context: CallbackContext):
+    await update.message.reply_text("Этот бот создан для того, чтобы ты мог отправлять фото с заданиями учителю. Просто отправь фото!")
+
+async def list_students(update: Update, context: CallbackContext):
+    if update.effective_user.id not in OWNER_IDS:
         return
-
-    if not user_names:
-        await message.answer("Пока никто не присылал фото.")
+    if not user_ids:
+        await update.message.reply_text("Ученики ещё не отправляли фото.")
     else:
-        response = "📋 <b>Список учеников:</b>\n"
-        for name in user_names:
-            response += f"– {hbold(name)}\n"
-        await message.answer(response)
+        text = "Ученики, отправившие фото:\n" + "\n".join([str(uid) for uid in user_ids])
+        await update.message.reply_text(text)
 
-@dp.message(Command("status"))
-async def status_cmd(message: Message):
-    await message.answer("✅ Бот работает исправно.")
+async def status(update: Update, context: CallbackContext):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+    await update.message.reply_text("✅ Бот работает!")
 
-@dp.message(Command("ping"))
-async def ping_cmd(message: Message):
-    await message.answer("Да, да я здесь, не беспокойся")
+async def ping(update: Update, context: CallbackContext):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+    await update.message.reply_text("Да, да я тут, спасибо что разбудили!")
 
-@dp.message(F.text.startswith("/broadcast"))
-async def broadcast_cmd(message: Message):
-    if message.from_user.id not in OWNER_IDS:
-        await message.answer("⛔ У вас нет доступа к этой команде.")
+async def broadcast(update: Update, context: CallbackContext):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+    if not context.args:
+        await update.message.reply_text("Используй: /broadcast Текст сообщения")
         return
 
-    parts = message.text.split(" ", 1)
-    if len(parts) < 2:
-        await message.answer("⚠️ Пожалуйста, напишите текст для рассылки после команды.\nПример: /broadcast Завтра контрольная работа!")
-        return
-
-    text_to_send = parts[1]
-    success, fail = 0, 0
-    for user_id in user_ids:
+    text = " ".join(context.args)
+    failed = 0
+    for uid in user_ids:
         try:
-            await bot.send_message(user_id, f"📢 Сообщение от учителя:\n{text_to_send}")
-            success += 1
-        except:
-            fail += 1
+            await context.bot.send_message(chat_id=uid, text=text)
+        except Exception as e:
+            logger.warning(f"Не удалось отправить сообщение {uid}: {e}")
+            failed += 1
 
-    await message.answer(f"✅ Рассылка завершена. Успешно: {success}, не удалось: {fail}")
+    await update.message.reply_text(f"Рассылка завершена. Не удалось отправить {failed} пользователям.")
 
-@dp.message(F.photo)
-async def handle_photo(message: Message):
-    user_names.add(message.from_user.full_name)
-    user_ids.add(message.from_user.id)
+async def handle_photo(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    user_ids.add(user_id)
 
+    # Отправка фото владельцам
     for owner_id in OWNER_IDS:
-        await message.copy_to(owner_id)
+        for photo in update.message.photo:
+            await context.bot.send_photo(chat_id=owner_id, photo=photo.file_id)
 
-    await message.answer("✅ Фото получено, преподаватель уже смотрит.")
+    await update.message.reply_text("Спасибо, задание принято!")
 
 async def main():
-    await dp.start_polling(bot)
+    application = Application.builder().token(BOT_TOKEN).build()
 
-if __name__ == "__main__":
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("list", list_students))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    logger.info("Бот запущен")
+    await application.run_polling()
+
+if __name__ == '__main__':
+    import asyncio
     asyncio.run(main())
