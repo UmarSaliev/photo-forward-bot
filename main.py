@@ -1,89 +1,80 @@
-import logging
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 import os
+import logging
+import asyncio
+from telegram import Update, BotCommand
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# Вставь свои данные ниже
-BOT_TOKEN = os.getenv("8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU")
-OWNER_IDS = {95293299, 784341697}  # замените на свои Telegram user_id
-
-# Хранилище пользователей, отправивших фото
-user_ids = set()
-
-# Включаем логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
+# Настройка логов
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Привет! Отправь фото с непонятным заданием — я передам учителю.")
+# Получаем токен и ID владельцев из переменных окружения
+BOT_TOKEN = os.getenv("8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU")
+OWNER_IDS = [int(uid) for uid in os.getenv("95293299", "784341697").split(",") if uid.strip().isdigit()]
 
-async def help_command(update: Update, context: CallbackContext):
-    await update.message.reply_text("Этот бот создан для того, чтобы ты мог отправлять фото с заданиями учителю. Просто отправь фото!")
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Привет! Я математический бот.\nНапиши /help, чтобы увидеть доступные команды.")
 
-async def list_students(update: Update, context: CallbackContext):
-    if update.effective_user.id not in OWNER_IDS:
-        return
-    if not user_ids:
-        await update.message.reply_text("Ученики ещё не отправляли фото.")
-    else:
-        text = "Ученики, отправившие фото:\n" + "\n".join([str(uid) for uid in user_ids])
-        await update.message.reply_text(text)
+# Команда /help
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📚 Список команд:\n"
+        "/start — начать работу\n"
+        "/help — справка\n"
+        "/ping — проверить онлайн\n"
+        "/status — статус бота\n"
+        "/list — список чего-либо (доступно только владельцам)"
+    )
 
-async def status(update: Update, context: CallbackContext):
-    if update.effective_user.id not in OWNER_IDS:
-        return
+# Команда /ping
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Бот работает!")
 
-async def ping(update: Update, context: CallbackContext):
-    if update.effective_user.id not in OWNER_IDS:
-        return
-    await update.message.reply_text("Да, да я тут, спасибо что разбудили!")
+# Команда /status
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📊 Всё в порядке. Бот запущен.")
 
-async def broadcast(update: Update, context: CallbackContext):
-    if update.effective_user.id not in OWNER_IDS:
-        return
-    if not context.args:
-        await update.message.reply_text("Используй: /broadcast Текст сообщения")
-        return
-
-    text = " ".join(context.args)
-    failed = 0
-    for uid in user_ids:
-        try:
-            await context.bot.send_message(chat_id=uid, text=text)
-        except Exception as e:
-            logger.warning(f"Не удалось отправить сообщение {uid}: {e}")
-            failed += 1
-
-    await update.message.reply_text(f"Рассылка завершена. Не удалось отправить {failed} пользователям.")
-
-async def handle_photo(update: Update, context: CallbackContext):
+# Команда /list (только для владельцев)
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_ids.add(user_id)
+    if user_id in OWNER_IDS:
+        await update.message.reply_text("📋 Вот ваш список: ...")
+    else:
+        await update.message.reply_text("🚫 У вас нет доступа к этой команде.")
 
-    # Отправка фото владельцам
-    for owner_id in OWNER_IDS:
-        for photo in update.message.photo:
-            await context.bot.send_photo(chat_id=owner_id, photo=photo.file_id)
+# Ответ на фото
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📷 Спасибо за фото!")
 
-    await update.message.reply_text("Спасибо, задание принято!")
-
+# Основная функция запуска
 async def main():
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN не задан в переменных окружения!")
+        return
+
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("list", list_students))
-    application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("list", list_command))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    logger.info("Бот запущен")
+    # Установка команд для меню Telegram
+    await application.bot.set_my_commands([
+        BotCommand("start", "Начать работу"),
+        BotCommand("help", "Справка по боту"),
+        BotCommand("ping", "Проверить онлайн"),
+        BotCommand("status", "Показать статус"),
+        BotCommand("list", "Список (только для владельцев)"),
+    ])
+
+    # Запуск
+    logger.info("🚀 Бот запущен!")
     await application.run_polling()
 
-if __name__ == '__main__':
-    import asyncio
+if __name__ == "__main__":
     asyncio.run(main())
