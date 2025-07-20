@@ -1,63 +1,94 @@
 import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.enums import ParseMode
+from aiogram.utils.markdown import hbold
+import asyncio
+import os
 
-# === НАСТРОЙКИ ===
-BOT_TOKEN = "8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU"
-OWNER_IDS = [95293299, 784341697]  # Замените на ваши Telegram ID
+BOT_TOKEN = os.getenv("8189283086:AAGR_QF2NuupIZA4G_Fhys_81CU-9-BOWaU")
+OWNER_IDS = {95293299, 784341697}  # Замените на реальные Telegram ID владельцев
 
-# === ЛОГГИРОВАНИЕ ===
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()
 
-# === ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ===
-senders = set()
+user_names = set()
+user_ids = set()
 
-# === ОБРАБОТЧИК ФОТО ===
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not update.message.photo:
+@dp.message(Command("start"))
+async def start_cmd(message: Message):
+    await message.answer("👋 Привет! Отправь фото с заданием, и оно будет переслано учителю.")
+
+@dp.message(Command("help"))
+async def help_cmd(message: Message):
+    await message.answer(
+        "📖 <b>Доступные команды:</b>\n"
+        "/start – Приветствие\n"
+        "/help – Справка\n"
+        "/list – Список учеников (только для учителя)\n"
+        "/status – Проверка статуса\n"
+        "/ping – Проверка связи\n"
+        "/broadcast – Рассылка от учителя"
+    )
+
+@dp.message(Command("list"))
+async def list_users(message: Message):
+    if message.from_user.id not in OWNER_IDS:
+        await message.answer("⛔ У вас нет доступа к этой команде.")
         return
 
-    senders.add(f"@{user.username}" if user.username else f"{user.first_name} ({user.id})")
+    if not user_names:
+        await message.answer("Пока никто не присылал фото.")
+    else:
+        response = "📋 <b>Список учеников:</b>\n"
+        for name in user_names:
+            response += f"– {hbold(name)}\n"
+        await message.answer(response)
+
+@dp.message(Command("status"))
+async def status_cmd(message: Message):
+    await message.answer("✅ Бот работает исправно.")
+
+@dp.message(Command("ping"))
+async def ping_cmd(message: Message):
+    await message.answer("Да, да я здесь, не беспокойся")
+
+@dp.message(F.text.startswith("/broadcast"))
+async def broadcast_cmd(message: Message):
+    if message.from_user.id not in OWNER_IDS:
+        await message.answer("⛔ У вас нет доступа к этой команде.")
+        return
+
+    parts = message.text.split(" ", 1)
+    if len(parts) < 2:
+        await message.answer("⚠️ Пожалуйста, напишите текст для рассылки после команды.\nПример: /broadcast Завтра контрольная работа!")
+        return
+
+    text_to_send = parts[1]
+    success, fail = 0, 0
+    for user_id in user_ids:
+        try:
+            await bot.send_message(user_id, f"📢 Сообщение от учителя:\n{text_to_send}")
+            success += 1
+        except:
+            fail += 1
+
+    await message.answer(f"✅ Рассылка завершена. Успешно: {success}, не удалось: {fail}")
+
+@dp.message(F.photo)
+async def handle_photo(message: Message):
+    user_names.add(message.from_user.full_name)
+    user_ids.add(message.from_user.id)
 
     for owner_id in OWNER_IDS:
-        await context.bot.forward_message(
-            chat_id=owner_id,
-            from_chat_id=update.message.chat_id,
-            message_id=update.message.message_id
-        )
+        await message.copy_to(owner_id)
 
-    await update.message.reply_text("Спасибо, задание получено! ✅")
+    await message.answer("✅ Фото получено, преподаватель уже смотрит.")
 
-# === /LIST ===
-async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in OWNER_IDS:
-        return
+async def main():
+    await dp.start_polling(bot)
 
-    if not senders:
-        await update.message.reply_text("Список отправителей пока пуст.")
-    else:
-        await update.message.reply_text("\n".join(sorted(senders)))
-
-# === /START ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Спасибо за то что отправил задание- скоро я его решу и отправлю тебе ответ.")
-
-# === /HELP ===
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📸 Отправь сюда фотографию непонятного задания — и я попробую его решить.")
-
-# === ЗАПУСК ===
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("list", list_command))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-
-    print("Бот запущен...")
-    app.run_polling()
+if __name__ == "__main__":
+    asyncio.run(main())
