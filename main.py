@@ -25,7 +25,7 @@ OWNER_IDS = [int(x) for x in OWNER_IDS_ENV.split(",") if x.strip().isdigit()]
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я Telegram‑бот. Введите /help для списка команд.")
+    await update.message.reply_text("👋 Привет! Я главный помощник лучшего учителя математики. Введите /help для списка команд.")
 
 # Команда /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
