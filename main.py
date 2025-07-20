@@ -7,10 +7,6 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
-from dotenv import load_dotenv
-
-# Загружаем переменные окружения из .env файла (если есть локально)
-load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
