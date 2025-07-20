@@ -25,26 +25,26 @@ OWNER_IDS = [int(x) for x in OWNER_IDS_ENV.split(",") if x.strip().isdigit()]
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я главный помощник лучшего учителя математики. Введите /help для списка команд.")
+    await update.message.reply_text("👋 Привет! Я главный помощник мистера Абдужалила 🤓. Ты можешь пересыласть мне задачи с которыми у тебя возникли проблемы и я передам их ему 🚀. Пожалуйста при отправке четко выдели саму задачу или пример и постарайся обьяснить в чем ты запутался 💯.")
 
 # Команда /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "/start — начать работу\n"
-        "/help — справка\n"
-        "/ping — проверить связь\n"
-        "/status — статус бота\n"
-        "/list — список (только владельцам)\n"
-        "/broadcast — рассылка (только владельцам)"
+        "/start — начать работу 💻\n"
+        "/help — основные команды 📖\n"
+        "/ping — проверить связь с хостом 🌐\n"
+        "/status — статус активности бота 🤖\n"
+        "/list — список учеников отправивших задания 🤓(доступен только учителю)\n"
+        "/broadcast — рассылка сообщений ✈️(доступен только учителю)"
     )
 
 # /ping
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 Pong!")
+    await update.message.reply_text("Я здесь, не беспокойся и всегда готов помочь.")
 
 # /status
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Бот работает нормально.")
+    await update.message.reply_text("✅ Бот работает исправно.")
 
 # /list (только для владельцев)
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +52,7 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ У вас нет доступа к этой команде.")
         return
     # Здесь можно выгружать реальные данные
-    await update.message.reply_text("📋 Список пользователей: ...")
+    await update.message.reply_text("📋 Список учеников: ...")
 
 # /broadcast текст (только для владельцев)
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,7 +64,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Используйте: /broadcast ваш текст")
         return
     # Здесь должна быть логика отправки всем user_ids
-    await update.message.reply_text("✅ Рассылка отправлена.")
+    await update.message.reply_text("✅ Сообщение отправлено.")
 
 # Обработка фото (если нужно)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
