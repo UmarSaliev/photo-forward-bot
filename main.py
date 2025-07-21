@@ -10,7 +10,7 @@ from telegram.ext import (
 TOKEN      = os.getenv("BOT_TOKEN")
 OWNER_IDS  = [int(uid) for uid in os.getenv("OWNER_IDS", "").split(",") if uid]
 OR_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL      = "mistralai/mixtral-8x7b"   # убрали префикс openrouter/
+MODEL      = "mistralai/mixtral-8x7b"
 students   = set()
 
 # ─── Логирование ──────────────────────────────────────────────────────────
@@ -26,10 +26,10 @@ async def ai_response(prompt: str) -> str:
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(url, headers=headers, json=payload)
+            body = await r.text()
             if r.status_code != 200:
-                # залогируем тело ответа, чтобы увидеть причину 400/403 и т.п.
-                logger.error("OpenRouter %s %s → %s", r.status_code, url, r.text)
-                return f"⚠️ Ошибка AI: код {r.status_code}"
+                logger.error("OpenRouter %s → %s", r.status_code, body)
+                return f"⚠️ Ошибка AI: код {r.status_code}\n{body}"
             data = r.json()
             return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
@@ -38,9 +38,11 @@ async def ai_response(prompt: str) -> str:
 
 # ─── /start ────────────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я главный помощник мистера Абдужалила 🤓."
+    await update.message.reply_text(
+        "👋 Привет! Я главный помощник мистера Абдужалила 🤓. "
         "Ты можешь пересылать мне задачи, с которыми у тебя возникли проблемы, и я передам их ему 🚀. "
-        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯.")
+        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯."
+    )
 
 # ─── /help ─────────────────────────────────────────────────────────────────
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
