@@ -1,2 +1,2 @@
 python-telegram-bot==20.8
-openai>=1.0.0
+requests==2.31.0
