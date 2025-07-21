@@ -1,7 +1,5 @@
-import logging
 import os
-import io
-import base64
+import logging
 import httpx
 from dotenv import load_dotenv
 from telegram import Update
@@ -9,8 +7,8 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    ContextTypes,
     filters,
+    ContextTypes,
 )
 
 load_dotenv()
@@ -18,84 +16,62 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = set(map(int, os.getenv("OWNER_IDS", "").split(",")))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-MODEL_ID = "openrouter/anthropic/claude-3-haiku"
-
+# Настройка логов
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я главный помощник мистера Абдужалила 🤓. "
-        "Ты можешь пересылать мне задачи, с которыми у тебя возникли проблемы, и я передам их ему 🚀. "
-        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯.")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_markdown_v2(
-        "📚 *Доступные команды:*\n"
-        "/check \\- Проверка решения по фото\n"
-        "/task \\- Новая задача\n"
-        "/definition \\- Определение термина\n"
-        "/formula \\- Формула по теме\n"
-        "/theorem \\- Теорема и пример"
-    )
-
-async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in OWNER_IDS and context.user_data.get("mode") == "check":
-        await update.message.reply_text("⚠️ Владелец не может использовать /check на фото.")
-        return
-
-    photo = await update.message.photo[-1].get_file()
-    photo_bytes = await photo.download_as_bytearray()
-
-    image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
-    prompt = f"На изображении находится задача по математике. Помоги решить её пошагово."
-
-    result = await ask_openrouter(prompt, image_b64)
-    await update.message.reply_text(result or "⚠️ Ошибка AI")
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    result = await ask_openrouter(text)
-    await update.message.reply_text(result or "⚠️ Ошибка AI")
-
-async def ask_openrouter(prompt, image_b64=None):
+# === OpenRouter Chat Completion ===
+async def ask_openrouter(prompt: str) -> str:
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://t.me/YourBot",  # укажи своего бота
-        "X-Title": "Telegram Math Bot",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://yourapp.com",
+        "X-Title": "MathBot",
     }
-    messages = [{"role": "user", "content": prompt}]
-    if image_b64:
-        messages[0]["content"] = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-        ]
-
-    data = {
-        "model": MODEL_ID,
-        "messages": messages,
+    payload = {
+        "model": "openrouter/cinematika-7b",  # можешь поменять на любой поддерживаемый
+        "messages": [{"role": "user", "content": prompt}],
     }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=60)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=60
-            )
-            if response.status_code != 200:
-                return f"⚠️ Ошибка AI: код {response.status_code}"
-            return response.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"⚠️ Ошибка AI: {str(e)}"
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.PHOTO, image_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.run_polling()
+# === Обработчики команд ===
 
-if __name__ == "__main__":
-    main()
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я математический бот с поддержкой AI. Отправь вопрос или используй команды.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Доступные команды:\n/check\n/task\n/definition\n/formula\n/theorem\n/ping\n/status")
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏓 Pong!")
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Бот работает нормально.")
+
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in OWNER_IDS:
+        await update.message.reply_text("Ты владелец. Доступ открыт.")
+    else:
+        await update.message.reply_text("⛔ Эта команда только для владельцев.")
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text.startswith(("/check", "/task", "/definition", "/formula", "/theorem")):
+        command, *prompt = text.split(maxsplit=1)
+        prompt_text = prompt[0] if prompt else "Объясни это, пожалуйста."
+        reply = await ask_openrouter(f"{command} {prompt_text}")
+        await update.message.reply_text(reply)
+    else:
+        reply = await ask_openrouter(text)
+        await update.message.reply_text(reply)
+
+
+# === Обработка фото ===
+async def handle_photo(update: Update, context: ContextTy_
