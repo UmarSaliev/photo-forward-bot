@@ -6,40 +6,43 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes, MessageHandler, filters
 )
 
-# Конфиг
-TOKEN       = os.getenv("BOT_TOKEN")
-OWNER_IDS   = [int(uid) for uid in os.getenv("OWNER_IDS", "").split(",") if uid]
-OR_API_KEY  = os.getenv("OPENROUTER_API_KEY")
-MODEL       = "openrouter/mistralai/mixtral-8x7b"
-students    = set()
+# ─── Конфигурация ──────────────────────────────────────────────────────────
+TOKEN      = os.getenv("BOT_TOKEN")
+OWNER_IDS  = [int(uid) for uid in os.getenv("OWNER_IDS", "").split(",") if uid]
+OR_API_KEY = os.getenv("OPENROUTER_API_KEY")
+MODEL      = "mistralai/mixtral-8x7b"   # убрали префикс openrouter/
+students   = set()
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
+# ─── Логирование ──────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# AI-запрос
+# ─── AI‑запрос ─────────────────────────────────────────────────────────────
 async def ai_response(prompt: str) -> str:
+    url     = "https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {OR_API_KEY}"}
-    json_data = {"model": MODEL, "messages":[{"role":"user","content":prompt}]}
+    payload = {"model": MODEL, "messages":[{"role":"user","content":prompt}]}
+
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers, json=json_data
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"].strip()
+            r = await client.post(url, headers=headers, json=payload)
+            if r.status_code != 200:
+                # залогируем тело ответа, чтобы увидеть причину 400/403 и т.п.
+                logger.error("OpenRouter %s %s → %s", r.status_code, url, r.text)
+                return f"⚠️ Ошибка AI: код {r.status_code}"
+            data = r.json()
+            return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        logger.error(f"AI error: {e}")
+        logger.exception("AI request failed")
         return f"⚠️ Ошибка AI: {e}"
 
-# /start
+# ─── /start ────────────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Я бот‑помощник по математике. /help"
-    )
+    await update.message.reply_text("👋 Привет! Я главный помощник мистера Абдужалила 🤓."
+        "Ты можешь пересылать мне задачи, с которыми у тебя возникли проблемы, и я передам их ему 🚀. "
+        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯.")
 
-# /help
+# ─── /help ─────────────────────────────────────────────────────────────────
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 📚 *Доступные команды:*
@@ -58,7 +61,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
-# Прочие
+# ─── простые команды ──────────────────────────────────────────────────────
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🏓 Pong!")
 
@@ -70,16 +73,14 @@ async def list_students(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("❌ Доступ запрещён.")
     if not students:
         return await update.message.reply_text("Пока никто не отправлял задания.")
-    await update.message.reply_text(
-        "👨‍🎓 Ученики:\n" + "\n".join(map(str, students))
-    )
+    await update.message.reply_text("👨‍🎓 Ученики:\n" + "\n".join(map(str, students)))
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in OWNER_IDS:
         return await update.message.reply_text("❌ Доступ запрещён.")
     text = " ".join(context.args)
     if not text:
-        return await update.message.reply_text("✏️ Укажи текст после /broadcast")
+        return await update.message.reply_text("✏️ Укажите текст после /broadcast")
     sent = 0
     for uid in students:
         try:
@@ -89,16 +90,16 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
     await update.message.reply_text(f"✅ Отправлено {sent} пользователям.")
 
-# Генерация AI‑обработчиков
+# ─── генерация AI‑обработчиков ─────────────────────────────────────────────
 def make_ai_handler(prefix: str):
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = " ".join(context.args)
         if not query:
-            return await update.message.reply_text(f"📥 Укажи тему после /{prefix}")
+            return await update.message.reply_text(f"📥 Укажи тему после команды /{prefix}")
         students.add(update.effective_user.id)
         prompt = f"{prefix.capitalize()} по теме '{query}' простыми словами."
-        res = await ai_response(prompt)
-        await update.message.reply_text(res)
+        answer = await ai_response(prompt)
+        await update.message.reply_text(answer)
     return handler
 
 check      = make_ai_handler("реши задачу")
@@ -107,7 +108,7 @@ formula    = make_ai_handler("выведи формулу")
 theorem    = make_ai_handler("объясни теорему")
 task       = make_ai_handler("сгенерируй задачу")
 
-# Обработка фотографий: пересылаем учителю
+# ─── пересылка фото учителю ───────────────────────────────────────────────
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     students.add(update.effective_user.id)
     for oid in OWNER_IDS:
@@ -118,9 +119,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text("📨 Фото отправлено учителю.")
 
-# Запуск
+# ─── запуск ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = Application.builder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("ping", ping))
@@ -133,4 +135,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("theorem", theorem))
     app.add_handler(CommandHandler("task", task))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    logger.info("🚀 Бот запущен!")
     app.run_polling()
