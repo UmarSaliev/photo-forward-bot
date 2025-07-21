@@ -1,4 +1,10 @@
-import os import logging from telegram import Update, InputFile from telegram.ext import ( ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ) import openai from io import BytesIO import base64
+import os 
+import logging from telegram 
+import Update, InputFile from telegram.ext 
+import ( ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, ) 
+import openai from io 
+import BytesIO 
+import base64
 
 Логирование
 
