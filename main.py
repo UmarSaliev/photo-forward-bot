@@ -36,11 +36,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет! Я математический помощник. Напиши задачу или пришли фото!")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("/task - реши задачу
-/check - проверь решение
-/definition - дай определение
-/formula - формула
-/theorem - теорема")
+    await update.message.reply_text(
+        "/task - реши задачу\n"
+        "/check - проверь решение\n"
+        "/definition - дай определение\n"
+        "/formula - формула\n"
+        "/theorem - теорема")
 
 async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = "Реши задачу: " + " ".join(context.args)
