@@ -1,5 +1,9 @@
 import logging
 import os
+import io
+import base64
+import httpx
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -8,29 +12,67 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from dotenv import load_dotenv
-import httpx
 
 load_dotenv()
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = set(map(int, os.getenv("OWNER_IDS", "").split(",")))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+MODEL_ID = "openrouter/anthropic/claude-3-haiku"
 
-# ===== OpenRouter AI Handler =====
-async def ask_openrouter(prompt: str) -> str:
+logging.basicConfig(level=logging.INFO)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Привет! Я главный помощник мистера Абдужалила 🤓. "
+        "Ты можешь пересылать мне задачи, с которыми у тебя возникли проблемы, и я передам их ему 🚀. "
+        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_markdown_v2(
+        "📚 *Доступные команды:*\n"
+        "/check \\- Проверка решения по фото\n"
+        "/task \\- Новая задача\n"
+        "/definition \\- Определение термина\n"
+        "/formula \\- Формула по теме\n"
+        "/theorem \\- Теорема и пример"
+    )
+
+async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in OWNER_IDS and context.user_data.get("mode") == "check":
+        await update.message.reply_text("⚠️ Владелец не может использовать /check на фото.")
+        return
+
+    photo = await update.message.photo[-1].get_file()
+    photo_bytes = await photo.download_as_bytearray()
+
+    image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+    prompt = f"На изображении находится задача по математике. Помоги решить её пошагово."
+
+    result = await ask_openrouter(prompt, image_b64)
+    await update.message.reply_text(result or "⚠️ Ошибка AI")
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    result = await ask_openrouter(text)
+    await update.message.reply_text(result or "⚠️ Ошибка AI")
+
+async def ask_openrouter(prompt, image_b64=None):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://t.me/YourBotUsername",  # Укажи юзернейм бота
-        "X-Title": "TelegramMathBot",
+        "HTTP-Referer": "https://t.me/YourBot",  # укажи своего бота
+        "X-Title": "Telegram Math Bot",
     }
-    json_data = {
-        "model": "mistralai/mixtral-8x7b",
-        "messages": [{"role": "user", "content": prompt}],
+    messages = [{"role": "user", "content": prompt}]
+    if image_b64:
+        messages[0]["content"] = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+        ]
+
+    data = {
+        "model": MODEL_ID,
+        "messages": messages,
     }
 
     try:
@@ -38,90 +80,21 @@ async def ask_openrouter(prompt: str) -> str:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
-                json=json_data,
-                timeout=20,
+                json=data,
+                timeout=60
             )
-            response.raise_for_status()
+            if response.status_code != 200:
+                return f"⚠️ Ошибка AI: код {response.status_code}"
             return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        logger.error(f"⚠️ Ошибка AI: {e}")
         return f"⚠️ Ошибка AI: {str(e)}"
 
-# ===== Команды с ИИ =====
-async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    command = update.message.text.split(" ")[0][1:]
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("📌 Введите тему после команды.")
-        return
-
-    prompt_map = {
-        "check": f"Проверь математическое решение: {query}",
-        "task": f"Реши задачу по математике: {query}",
-        "definition": f"Дай определение: {query}",
-        "formula": f"Напиши формулу по теме: {query}",
-        "theorem": f"Объясни теорему: {query}",
-    }
-
-    prompt = prompt_map.get(command, query)
-    answer = await ask_openrouter(prompt)
-    await update.message.reply_text(answer)
-
-# ===== Стандартные команды =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Привет! Я бот-помощник по математике.\n"
-        "📚 *Доступные команды:*\n"
-        "/check [пример] – проверить решение\n"
-        "/task [задача] – решить задачу\n"
-        "/definition [тема] – объяснение\n"
-        "/formula [тема] – формула\n"
-        "/theorem [тема] – теорема\n"
-        "/ping – пинг\n"
-        "/status – статус\n"
-        "/broadcast [сообщение] – рассылка (только для владельцев)\n",
-        parse_mode="Markdown"
-    )
-
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 Pong!")
-
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Бот работает!")
-
-async def list_owners(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in OWNER_IDS:
-        return await update.message.reply_text("⛔ Нет доступа.")
-    await update.message.reply_text(f"👑 Владелец(ы): {', '.join(map(str, OWNER_IDS))}")
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in OWNER_IDS:
-        return await update.message.reply_text("⛔ Нет доступа.")
-    text = " ".join(context.args)
-    if not text:
-        return await update.message.reply_text("📌 Введите сообщение.")
-    
-    for user_id in OWNER_IDS:
-        try:
-            await context.bot.send_message(chat_id=user_id, text=f"📢 Рассылка:\n\n{text}")
-        except Exception as e:
-            logger.warning(f"Не удалось отправить сообщение {user_id}: {e}")
-    await update.message.reply_text("✅ Сообщение разослано.")
-
-# ===== Запуск =====
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("list", list_owners))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-
-    for cmd in ["check", "task", "definition", "formula", "theorem"]:
-        app.add_handler(CommandHandler(cmd, ai_command))
-
-    logger.info("🚀 Бот запущен!")
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.PHOTO, image_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.run_polling()
 
 if __name__ == "__main__":
