@@ -1,102 +1,109 @@
 import logging
 import os
-from telegram import Update, InputFile
+import httpx
+from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters,
-    ContextTypes
+    Application, CommandHandler, ContextTypes, MessageHandler, filters
 )
-from openrouter import OpenRouter
 
 # Конфигурация
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = [int(uid) for uid in os.getenv("OWNER_IDS", "").split(",") if uid]
-
-# OpenRouter конфигурация
 OR_API_KEY = os.getenv("OPENROUTER_API_KEY")
 MODEL = "openrouter/mistralai/mixtral-8x7b"
-or_client = OpenRouter(api_key=OR_API_KEY)
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Обработка команды /start
+# Хранилище пользователей
+students = set()
+
+# Универсальный AI-запрос
+async def ai_response(prompt: str) -> str:
+    headers = {
+        "Authorization": f"Bearer {OR_API_KEY}",
+        "HTTP-Referer": "https://t.me/YOUR_BOT_USERNAME",
+        "X-Title": "MathBot"
+    }
+    json_data = {
+        "model": MODEL,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=json_data)
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.error(f"AI error: {e}")
+        return f"⚠️ Ошибка AI: {e}"
+
+# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Привет! Я главный помощник мистера Абдужалила 🤓. Ты можешь пересылать мне задачи с которыми у тебя возникли проблемы и я передам их ему 🚀. Пожалуйста при отправке четко выдели саму задачу или пример и постарайся обьяснить в чем ты запутался 💯."
+        "👋 Привет! Я главный помощник мистера Абдужалила 🤓. "
+        "Ты можешь пересылать мне задачи, с которыми у тебя возникли проблемы, и я передам их ему 🚀. "
+        "Пожалуйста, при отправке четко выдели саму задачу и постарайся объяснить, в чем ты запутался 💯."
     )
 
-# Обработка команды /help
+# Хелп
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = (
-        "📚 *Доступные команды:*
-"
-        "/start — начать работу 💻\n"
-        "/help — основные команды 📖\n"
-        "/ping — проверить связь с хостом 🌐\n"
-        "/status — статус активности бота 🤖\n"
-        "/list — список учеников, отправивших задания 🤓 (только для учителя)\n"
-        "/broadcast — рассылка сообщений ✈️ (только для учителя)\n"
-        "/task <запрос> — сгенерировать задачу по математике 📌\n"
-        "/definition <тема> — дать определение математического термина 📘\n"
-        "/formula <тема> — выдать формулу 📐\n"
-        "/theorem <название> — объяснить теорему 📏\n"
-        "/check <задача> — проверить и решить задачу ✍️"
-    )
+    help_text = """
+📚 *Доступные команды:*
+
+/start — начать работу 💻
+/help — основные команды 📖
+/ping — проверить связь с хостом 🌐
+/status — статус активности бота 🤖
+/list — список учеников (только для учителя) 🤓
+/broadcast — рассылка сообщений ✈️ (только для учителя)
+/task <тема> — сгенерировать задачу 📌
+/definition <тема> — дать определение 📘
+/formula <тема> — выдать формулу 📐
+/theorem <название> — объяснить теорему 📏
+/check <задача> — решить задачу ✍️
+"""
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
-# Проверка связи
+# Прочие команды
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🏓 Pong! Бот работает.")
 
-# Статус активности
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Бот активен и готов к работе.")
-
-# Список учеников (заглушка, т.к. база не подключена)
-students = set()
 
 async def list_students(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in OWNER_IDS:
         return await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-    
+
     if not students:
         return await update.message.reply_text("Пока никто не отправлял задания.")
 
-    names = [str(s) for s in students]
+    names = [str(uid) for uid in students]
     await update.message.reply_text("👨‍🎓 Ученики отправившие задания:\n" + "\n".join(names))
 
-# Рассылка
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in OWNER_IDS:
         return await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-    
+
     text = " ".join(context.args)
     if not text:
         return await update.message.reply_text("✏️ Укажите текст рассылки после команды.")
 
     count = 0
-    for user_id in students:
+    for uid in students:
         try:
-            await context.bot.send_message(chat_id=user_id, text=text)
+            await context.bot.send_message(chat_id=uid, text=text)
             count += 1
         except Exception as e:
-            logger.error(f"Ошибка отправки пользователю {user_id}: {e}")
+            logger.error(f"Ошибка отправки пользователю {uid}: {e}")
 
     await update.message.reply_text(f"✅ Сообщение отправлено {count} пользователям.")
 
-# Универсальный AI-помощник
-async def ai_response(prompt: str) -> str:
-    try:
-        response = or_client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"⚠️ Ошибка AI: {e}"
-
-# Обработчики AI-команд
+# Генерация обработчиков AI-команд
 def make_ai_handler(prefix: str):
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = " ".join(context.args)
@@ -110,6 +117,7 @@ def make_ai_handler(prefix: str):
         await update.message.reply_text(result)
     return handler
 
+# Обработчики
 check = make_ai_handler("Реши задачу")
 definition = make_ai_handler("Дай определение")
 formula = make_ai_handler("Выведи формулу")
