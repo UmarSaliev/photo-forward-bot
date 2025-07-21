@@ -11,20 +11,16 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_IDS = list(map(int, os.getenv("OWNER_IDS", "").split(","))) if os.getenv("OWNER_IDS") else []
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-BOT_USERNAME = "@JalilSupportBot"  # Замени на юзернейм бота (например, "@MathHelperBot")
+BOT_USERNAME = "@JalilSupportBot"  # Замените на реальный юзернейм бота (например, "@MathTeacherBot")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Проверка доступа (только для OWNER_IDS)
-async def is_owner(update: Update) -> bool:
-    return update.effective_user.id in OWNER_IDS
-
-# AI-запрос к OpenRouter
+# --- Основные функции ---
 async def ask_ai(prompt):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": f"https://t.me/{BOT_USERNAME[1:]}",  # Убираем @ из юзернейма
+        "HTTP-Referer": f"https://t.me/{BOT_USERNAME[1:]}",
         "X-Title": "MathHelperBot"
     }
     json_data = {
@@ -32,85 +28,71 @@ async def ask_ai(prompt):
         "messages": [{"role": "user", "content": prompt}]
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=json_data) as resp:
+        async with session.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=json_data,
+            timeout=aiohttp.ClientTimeout(total=15) as resp:
             data = await resp.json()
             return data["choices"][0]["message"]["content"]
 
-# Команды для всех
+# --- Команды ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Привет! Я математический помощник. Напиши задачу или пришли фото!")
+    await update.message.reply_text("👋 Привет! Я бот-помощник по математике. Задайте вопрос или отправьте фото.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Доступные команды:\n"
-        "/task - реши задачу\n"
-        "/formula - формула\n"
-        "/theorem - теорема\n"
-        "/search - поиск по фото\n"
+        "/task - Решить задачу\n"
+        "/formula - Получить формулу\n"
+        "/theorem - Теорема\n"
+        "/search - Поиск по фото\n"
     )
-    if await is_owner(update):
-        help_text += "\nКоманды для учителя:\n/broadcast - рассылка\n/list - список учеников"
+    if update.effective_user.id in OWNER_IDS:
+        help_text += "\nКоманды для учителя:\n/broadcast - Рассылка\n/list - Список учеников"
     await update.message.reply_text(help_text)
 
-async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = "Реши задачу: " + " ".join(context.args)
-    response = await ask_ai(prompt)
-    await update.message.reply_text(response)
-
-async def formula(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = "Формула: " + " ".join(context.args)
-    response = await ask_ai(prompt)
-    await update.message.reply_text(response)
-
-async def theorem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = "Теорема: " + " ".join(context.args)
-    response = await ask_ai(prompt)
-    await update.message.reply_text(response)
-
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.photo:
-        await update.message.reply_text("🔎 Анализирую изображение...")
-    else:
-        prompt = "Поиск: " + " ".join(context.args)
+# --- Обработчики сообщений ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    
+    prompt = update.message.text
+    try:
         response = await ask_ai(prompt)
         await update.message.reply_text(response)
+    except Exception as e:
+        logger.error(f"Ошибка в handle_text: {e}")
+        await update.message.reply_text("⚠️ Ошибка: не удалось обработать запрос.")
 
-# Команды только для OWNER_IDS
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_owner(update):
-        await update.message.reply_text("❌ Доступ запрещён.")
-        return
-    # Здесь логика рассылки (например, сохранённым пользователям)
-    await update.message.reply_text("Рассылка запущена!")
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if OWNER_IDS:
+        photo = update.message.photo[-1].file_id
+        caption = f"📸 Фото от пользователя: {update.message.from_user.username or update.message.from_user.id}"
+        for owner_id in OWNER_IDS:
+            await context.bot.send_photo(chat_id=owner_id, photo=photo, caption=caption)
+        await update.message.reply_text("📤 Фото отправлено учителю!")
+    else:
+        await update.message.reply_text("❌ Нет доступных получателей.")
 
-async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_owner(update):
-        await update.message.reply_text("❌ Доступ запрещён.")
-        return
-    # Здесь логика вывода списка учеников
-    await update.message.reply_text("Список учеников: ...")
-
-# Обработчики
+# --- Запуск ---
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Общедоступные команды
+    # Обработчики команд
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("task", task))
-    app.add_handler(CommandHandler("formula", formula))
-    app.add_handler(CommandHandler("theorem", theorem))
-    app.add_handler(CommandHandler("search", search))
-    
-    # Команды только для владельцев
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("list", list_users))
+    # ... остальные команды ...
 
-    # Обработка фото и текста
+    # Обработчики сообщений
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_photo))
 
-    logger.info("🤖 Бот запущен...")
+    # Обработчик ошибок
+    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.error(f"Ошибка: {context.error}")
+    
+    app.add_error_handler(error_handler)
     app.run_polling()
 
 if __name__ == "__main__":
