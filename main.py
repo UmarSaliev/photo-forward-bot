@@ -1,111 +1,96 @@
-import os
 import logging
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, ContextTypes
-)
-from openai import OpenAI
+import os
+from telegram import Update, InputFile
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import requests
 
-# Логирование
+OWNER_IDS = [123456789]  # Замените на свой ID
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Загрузка токенов из переменных окружения
-TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OWNER_IDS = [int(i) for i in os.getenv("OWNER_IDS", "").split(",") if i]
+user_states = {}
 
-# Инициализация клиента OpenAI
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Хранилище активных режимов
-user_modes = {}
-
-# Команды
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Я бот-помощник по математике.\n"
-        "/start - Начать\n"
-        "/help - Помощь\n"
-        "/check - Проверить задачу\n"
-        "/task - Новая задача\n"
-        "/definition - Определение\n"
-        "/formula - Формула\n"
-        "/theorem - Теорема"
+        "Привет! Я бот-помощник по математике 🤖\n"
+        "Используй команды:\n"
+        "/check — проверить задачу\n"
+        "/task — сгенерировать задачу\n"
+        "/definition — объяснить термин\n"
+        "/formula — найти формулу\n"
+        "/theorem — найти теорему"
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Просто отправь мне математическую задачу текстом или фото!")
-
-async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_modes[user_id] = "check"
-    await update.message.reply_text("🔍 Пришлите текст или фотографию задачи для проверки")
-
-async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id in OWNER_IDS:
-        users = list(user_modes.keys())
-        await update.message.reply_text(f"👥 Пользователи: {users}")
-    else:
-        await update.message.reply_text("⛔ Недостаточно прав.")
+    await update.message.reply_text("Напиши /check и пришли мне математическую задачу в тексте или фото!")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text.strip()
-    mode = user_modes.get(user_id)
-
-    if mode == "check":
-        try:
-            response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Ты помощник по математике. Отвечай понятно и по существу."},
-                    {"role": "user", "content": text}
-                ]
-            )
-            answer = response.choices[0].message.content
-            await update.message.reply_text(f"📘 Ответ:\n{answer}")
-        except Exception as e:
-            logger.error(f"OpenAI Error: {e}")
-            await update.message.reply_text(f"⚠️ Ошибка OpenAI:\n\n{e}")
-        finally:
-            user_modes.pop(user_id, None)
+    if user_states.get(user_id) == "awaiting_check":
+        user_states[user_id] = None
+        await process_with_ai(update, update.message.text)
     else:
-        await update.message.reply_text("✉️ Не понял. Напиши /check перед тем как отправить задачу.")
+        await update.message.reply_text("🔍 Отправь текст или фото задачи для проверки с командой /check.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    mode = user_modes.get(user_id)
-
-    if mode == "check":
-        file = await update.message.photo[-1].get_file()
-        photo_bytes = await file.download_as_bytearray()
-        await update.message.reply_text("🖼️ Получено фото задачи. Я пока не умею его распознавать.")
-        # Здесь можно подключить распознавание через OCR
-        user_modes.pop(user_id, None)
+    if user_states.get(user_id) == "awaiting_check":
+        user_states[user_id] = None
+        photo_file = await update.message.photo[-1].get_file()
+        file_path = f"photo_{user_id}.jpg"
+        await photo_file.download_to_drive(file_path)
+        await update.message.reply_text("📸 Фото задачи получено. Отправка в ИИ...")
+        await process_with_ai(update, f"[Изображение задачи: {file_path}]")  # Можно распознать с OCR позже
     elif user_id in OWNER_IDS:
-        return
-    else:
-        for owner in OWNER_IDS:
-            await context.bot.forward_message(chat_id=owner, from_chat_id=update.message.chat_id, message_id=update.message.message_id)
+        await context.bot.send_photo(chat_id=OWNER_IDS[0], photo=update.message.photo[-1].file_id)
 
-# Дополнительные команды
+async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_states[update.effective_user.id] = "awaiting_check"
+    await update.message.reply_text("🔍 Пришли текст или фото задачи для проверки.")
+
+async def process_with_ai(update: Update, prompt: str):
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    body = {
+        "model": "openai/gpt-3.5-turbo",  # Можно заменить на другой, например mistralai/mistral-7b
+        "messages": [
+            {"role": "system", "content": "Ты — математический помощник. Отвечай чётко, кратко и по теме."},
+            {"role": "user", "content": prompt},
+        ],
+    }
+
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=body)
+        data = response.json()
+
+        if "choices" in data:
+            reply = data["choices"][0]["message"]["content"]
+            await update.message.reply_text(reply)
+        else:
+            await update.message.reply_text("⚠️ Ошибка при получении ответа от ИИ.")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка при подключении к ИИ:\n{e}")
+
 async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📌 Новая задача: 2x + 5 = 11. Найди x.")
+    await process_with_ai(update, "Придумай интересную задачу по математике.")
 
 async def definition(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📚 Определение: Парабола — это геометрическое место точек, равноудалённых от фокуса и директрисы.")
+    await process_with_ai(update, "Объясни математический термин.")
 
 async def formula(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📐 Формула площади треугольника: S = 1/2 * a * h")
+    await process_with_ai(update, "Приведи математическую формулу с объяснением.")
 
 async def theorem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📏 Теорема Пифагора: a² + b² = c²")
+    await process_with_ai(update, "Назови и объясни важную математическую теорему.")
 
-# Основная функция запуска
 def main():
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -114,12 +99,11 @@ def main():
     application.add_handler(CommandHandler("definition", definition))
     application.add_handler(CommandHandler("formula", formula))
     application.add_handler(CommandHandler("theorem", theorem))
-    application.add_handler(CommandHandler("list", list_users))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     logger.info("🚀 Бот запущен!")
     application.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
