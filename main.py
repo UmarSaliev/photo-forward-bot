@@ -74,4 +74,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # === Обработка фото ===
-async def handle_photo(update: Update, context: ContextTy_
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in OWNER_IDS and update.message.caption and update.message.caption.startswith("/check"):
+        await update.message.reply_text("⛔ Владелец не может проверять свои собственные фото.")
+        return
+
+    await update.message.reply_text("🖼️ Обработка изображения... (но пока только текст поддерживается)")
