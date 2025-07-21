@@ -1,3 +1,2 @@
 python-telegram-bot==20.8
-python-dotenv
-nest_asyncio
+openai==1.30.1
