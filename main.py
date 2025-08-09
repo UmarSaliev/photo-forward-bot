@@ -1,6 +1,8 @@
 import logging
 import os
 import json
+import random
+import time
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -15,6 +17,9 @@ from dotenv import load_dotenv
 import atexit
 from threading import Timer
 import copy
+from flask import Flask
+from threading import Thread
+import requests
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -392,8 +397,39 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(help_text)
 
+# ==================== FLASK СЕРВЕР И БЕЗОПАСНЫЙ САМОПИНГ ====================
+app_flask = Flask(__name__)
+
+@app_flask.route('/')
+def flask_home():
+    return "Telegram Bot is running!"
+
+def run_flask():
+    if os.environ.get('REPL_SLUG'):  # Только на Replit
+        def safe_ping():
+            try:
+                # Случайный интервал 10-15 минут (600-900 секунд)
+                delay = random.randint(600, 900)
+                time.sleep(delay)
+                
+                url = f"https://{os.environ['REPL_SLUG']}.{os.environ['REPL_OWNER']}.repl.co"
+                requests.get(url, timeout=5)
+            except Exception as e:
+                logger.error(f"Ping failed: {str(e)}")
+            finally:
+                # Рекурсивно запускаем следующий пинг
+                Timer(1, safe_ping).start()
+
+        # Первый пинг через 1 минуту после запуска
+        Timer(60, safe_ping).start()
+    
+    app_flask.run(host='0.0.0.0', port=8080)
+
 # --- Запуск бота ---
 def main():
+    # Запускаем Flask в отдельном потоке
+    Thread(target=run_flask, daemon=True).start()
+
     app = ApplicationBuilder().token(TOKEN).build()
 
     # Обработчики
@@ -437,7 +473,7 @@ def main():
     auto_save()
     atexit.register(user_manager.save)
     
-    logger.info("Бот запущен с функцией рассылки")
+    logger.info("Бот запущен с безопасным Flask-сервером")
     app.run_polling()
 
 if __name__ == "__main__":
